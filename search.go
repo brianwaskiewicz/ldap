@@ -322,7 +322,6 @@ func (l *Conn) SearchWithPagingHandler(searchRequest *SearchRequest, pagingSize 
 		pagingControl = castControl
 	}
 
-	searchResult := new(SearchResult)
 	for {
 		result, err := l.Search(searchRequest)
 		l.Debug.Printf("Looking for Paging Control...")
