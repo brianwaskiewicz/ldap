@@ -250,6 +250,13 @@ type SearchRequest struct {
 	Controls     []Control
 }
 
+type SearchResultHandler interface {
+	HandleEntry(entry *Entry)
+	HandleReferral(referral string)
+	HandleControl(control Control)
+	HandleError(err error)
+}
+
 func (s *SearchRequest) encode() (*ber.Packet, error) {
 	request := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ApplicationSearchRequest, nil, "Search Request")
 	request.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, s.BaseDN, "Base DN"))
@@ -292,6 +299,69 @@ func NewSearchRequest(
 		Filter:       Filter,
 		Attributes:   Attributes,
 		Controls:     Controls,
+	}
+}
+
+func (l *Conn) SearchWithPagingHandler(searchRequest *SearchRequest, pagingSize uint32, handler SearchResultHandler) {
+	var pagingControl *ControlPaging
+
+	control := FindControl(searchRequest.Controls, ControlTypePaging)
+	if control == nil {
+		pagingControl = NewControlPaging(pagingSize)
+		searchRequest.Controls = append(searchRequest.Controls, pagingControl)
+	} else {
+		castControl, ok := control.(*ControlPaging)
+		if !ok {
+			return nil, fmt.Errorf("Expected paging control to be of type *ControlPaging, got %v", control)
+		}
+		if castControl.PagingSize != pagingSize {
+			return nil, fmt.Errorf("Paging size given in search request (%d) conflicts with size given in search call (%d)", castControl.PagingSize, pagingSize)
+		}
+		pagingControl = castControl
+	}
+
+	searchResult := new(SearchResult)
+	for {
+		result, err := l.Search(searchRequest)
+		l.Debug.Printf("Looking for Paging Control...")
+		if err != nil {
+			handler.HandleError(err)
+		}
+		if result == nil {
+			return handler.HandleError(NewError(ErrorNetwork, errors.New("ldap: packet not received")))
+		}
+
+		for _, entry := range result.Entries {
+			handler.HandleEntry(entry)
+		}
+		for _, referral := range result.Referrals {
+			handler.HandleReferral(referral)
+		}
+		for _, control := range result.Controls {
+			handler.HandleControl(control)
+		}
+
+		l.Debug.Printf("Looking for Paging Control...")
+		pagingResult := FindControl(result.Controls, ControlTypePaging)
+		if pagingResult == nil {
+			pagingControl = nil
+			l.Debug.Printf("Could not find paging control.  Breaking...")
+			break
+		}
+
+		cookie := pagingResult.(*ControlPaging).Cookie
+		if len(cookie) == 0 {
+			pagingControl = nil
+			l.Debug.Printf("Could not find cookie.  Breaking...")
+			break
+		}
+		pagingControl.SetCookie(cookie)
+	}
+
+	if pagingControl != nil {
+		l.Debug.Printf("Abandoning Paging...")
+		pagingControl.PagingSize = 0
+		l.Search(searchRequest)
 	}
 }
 
