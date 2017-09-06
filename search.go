@@ -312,10 +312,12 @@ func (l *Conn) SearchWithPagingHandler(searchRequest *SearchRequest, pagingSize 
 	} else {
 		castControl, ok := control.(*ControlPaging)
 		if !ok {
-			return nil, fmt.Errorf("Expected paging control to be of type *ControlPaging, got %v", control)
+			e := fmt.Errorf("Expected paging control to be of type *ControlPaging, got %v", control)
+			handler.HandleError(e)
 		}
 		if castControl.PagingSize != pagingSize {
-			return nil, fmt.Errorf("Paging size given in search request (%d) conflicts with size given in search call (%d)", castControl.PagingSize, pagingSize)
+			e := fmt.Errorf("Paging size given in search request (%d) conflicts with size given in search call (%d)", castControl.PagingSize, pagingSize)
+			handler.HandleError(e)
 		}
 		pagingControl = castControl
 	}
@@ -328,7 +330,8 @@ func (l *Conn) SearchWithPagingHandler(searchRequest *SearchRequest, pagingSize 
 			handler.HandleError(err)
 		}
 		if result == nil {
-			return handler.HandleError(NewError(ErrorNetwork, errors.New("ldap: packet not received")))
+			e := NewError(ErrorNetwork, errors.New("ldap: packet not received"))
+			handler.HandleError(e)
 		}
 
 		for _, entry := range result.Entries {
